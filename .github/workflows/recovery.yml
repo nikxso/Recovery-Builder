@@ -1,68 +1,57 @@
-name: Building recovery
+name: Build TWRP Recovery Image
 
 on:
-#  release:
-#    types: [published]
-#  push:
-#    branches:
-#      - master
-#    paths:
-#      - '.config'
-#  schedule:
-#    - cron: 0 8 * * 5
-  workflow_dispatch:
-
-env:
-  MANIFEST: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni -b twrp-9.0
-  DEVICE: G54
-  DT_LINK: https://github.com/twrpdtgen/android_device_motorola_cancunf/tree/cancunf_g_sysq-user-14-U1TDS34.94-12-7-5-b346d-4ee98f-release-keys
-  DT_PATH: device/moto/g54
-  TARGET: recoveryimage
-  TZ: Asia/manila
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
-    steps:
-       - name: Checkout
-         uses: actions/checkout@master
-         
+    env:
+      MAKEFLAGS: "-j$(nproc)"  # Use all available cores for faster building
 
-       - name: Initializing environment
-         run: |
-            sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /etc/apt/sources.list.d
-            docker rmi `docker images -q`
-            sudo apt-get remove account-plugin-facebook account-plugin-flickr account-plugin-jabber account-plugin-salut account-plugin-twitter account-plugin-windows-live account-plugin-yahoo aisleriot brltty duplicity empathy empathy-common example-content gnome-accessibility-themes gnome-contacts gnome-mahjongg gnome-mines gnome-orca gnome-screensaver gnome-sudoku gnome-video-effects gnomine landscape-common libreoffice-avmedia-backend-gstreamer libreoffice-base-core libreoffice-calc libreoffice-common libreoffice-core libreoffice-draw libreoffice-gnome libreoffice-gtk libreoffice-impress libreoffice-math libreoffice-ogltrans libreoffice-pdfimport libreoffice-style-galaxy libreoffice-style-human libreoffice-writer libsane libsane-common mcp-account-manager-uoa python3-uno rhythmbox rhythmbox-plugins rhythmbox-plugin-zeitgeist sane-utils shotwell shotwell-common telepathy-gabble telepathy-haze telepathy-idle telepathy-indicator telepathy-logger telepathy-mission-control-5 telepathy-salut totem totem-common totem-plugins printer-driver-brlaser printer-driver-foo2zjs printer-driver-foo2zjs-common printer-driver-m2300w printer-driver-ptouch printer-driver-splix
-            git config --global user.name "mastersenpai05"
-            git config --global user.email "pampangavergil0405@gmail.com"         
-            sudo -E apt-get -y purge azure-cli ghc* zulu* hhvm llvm* firefox google* dotnet* powershell openjdk* mysql* php* 
-            sudo -E apt-get clean
-            sudo -E apt-get -qq update
-            sudo -E apt-get -qq install bc build-essential zip curl libstdc++6 git wget python gcc clang libssl-dev repo rsync flex curl  bison aria2
-            sudo curl --create-dirs -L -o /usr/local/bin/repo -O -L https://storage.googleapis.com/git-repo-downloads/repo
-            sudo chmod a+rx /usr/local/bin/repo
-            
-       - name: Sync recovery source and device tree
-         run: |
-             mkdir work
-             cd work
-             repo init -u $MANIFEST --depth=1
-             repo sync -c -j4 --force-sync --no-clone-bundle --no-tags
-             repo sync -c -j4 --force-sync --no-clone-bundle --no-tags
-             git clone --depth=1 $DT_LINK $DT_PATH
-             
-       - name: Build
-         run: |
-              cd work
-              . build/envsetup.sh &&lunch omni_$DEVICE-eng &&export ALLOW_MISSING_DEPENDENCIES=true && mka $TARGET
-             
-       - name: Release recovery image
-         uses: softprops/action-gh-release@v1
-         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-         with:
-          tag_name: TWRP_9.0
-          name: TWRP-G54
-          files: | 
-            work/out/target/product/G54/recovery.img
+    steps:
+      # Checkout the code from your repository
+      - name: Checkout device tree
+        uses: actions/checkout@v3
+        with:
+          repository: twrpdtgen/android_device_motorola_cancunf
+          path: device/motorola/cancunf
+
+      # Set up the TWRP repo
+      - name: Init TWRP repo
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential curl flex \
+              git gnupg gperf libncurses5-dev libssl-dev \
+              python3 python-is-python3 repo rsync unzip \
+              zip zlib1g-dev
+
+          # Initialize the TWRP repo
+          repo init -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-12.1
+          repo sync --force-sync --no-tags --no-clone-bundle -j$(nproc)
+
+      # Clone the device tree for your device
+      - name: Set up device tree for motorola_cancunf
+        run: |
+          mkdir -p device/motorola/cancunf
+          git clone https://github.com/twrpdtgen/android_device_motorola_cancunf.git device/motorola/cancunf
+
+      # Build TWRP Recovery Image
+      - name: Build TWRP
+        run: |
+          source build/envsetup.sh
+          lunch omni_cancunf-eng
+          mka recoveryimage
+
+      # Upload the recovery image artifact
+      - name: Upload TWRP Recovery Image
+        uses: actions/upload-artifact@v3
+        with:
+          name: twrp-recovery-img
+          path: out/target/product/cancunf/recovery.img
